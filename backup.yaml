@@ -1,0 +1,48 @@
+name: Automated DB Backup
+
+on:
+  schedule:
+    - cron: '0 0,12 * * *' # Runs at 00:00 and 12:00 UTC (every 12 hours)
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mongodb-tools awscli openssh-client
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Backup and Upload
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+            # Variables
+            DB_NAME="mydatabase"
+            BACKUP_DIR="/tmp/db_backup"
+            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+            BACKUP_FILE="${DB_NAME}_${TIMESTAMP}.tar.gz"
+            R2_BUCKET="db-backups"
+            R2_ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+            # Create backup dir
+            mkdir -p $BACKUP_DIR
+
+            # Dump the database
+            mongodump --db $DB_NAME --out $BACKUP_DIR
+
+            # Compress to tarball
+            tar -czf $BACKUP_FILE -C $BACKUP_DIR .
+
+            # Upload to R2
+            aws s3 cp $BACKUP_FILE s3://$R2_BUCKET/ --endpoint-url $R2_ENDPOINT --region auto
+
+            # Clean up
+            rm -rf $BACKUP_DIR $BACKUP_FILE
+          EOF

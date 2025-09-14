@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Variables
+DB_NAME="mydatabase"
+RESTORE_DIR="/tmp/db_restore"
+R2_BUCKET="db-backups"
+R2_ENDPOINT="https://<your-account-id>.r2.cloudflarestorage.com"  # Replace <your-account-id>
+
+# Get latest backup file name from R2
+LATEST_FILE=$(aws s3 ls s3://$R2_BUCKET/ --endpoint-url $R2_ENDPOINT | sort | tail -n 1 | awk '{print $4}')
+
+if [ -z "$LATEST_FILE" ]; then
+  echo "No backups found in R2 bucket."
+  exit 1
+fi
+
+# Download latest backup
+aws s3 cp s3://$R2_BUCKET/$LATEST_FILE . --endpoint-url $R2_ENDPOINT
+
+# Extract tarball
+mkdir -p $RESTORE_DIR
+tar -xzf $LATEST_FILE -C $RESTORE_DIR
+
+# Restore to MongoDB (drops existing DB if exists)
+mongorestore --db $DB_NAME --drop $RESTORE_DIR/$DB_NAME
+
+# Clean up
+rm -rf $RESTORE_DIR $LATEST_FILE
+
+echo "Restore completed from: $LATEST_FILE"
